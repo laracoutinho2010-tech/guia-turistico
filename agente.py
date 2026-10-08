@@ -1,114 +1,245 @@
 import os
-import streamlit as st
+from flask import Flask, render_template_string, request, jsonify
 from groq import Groq
 from dotenv import load_dotenv
 
-# Carrega variáveis de ambiente (localmente)
 load_dotenv()
 
-# Configuração da página do Streamlit
-st.set_page_config(
-    page_title="Guia Turístico & Socorro",
-    page_icon="✈️",
-    layout="centered"
-)
+app = Flask(__name__)
 
-# Inicializa o cliente Groq usando os secrets do Streamlit Cloud ou arquivo .env local
-groq_api_key = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
+# Configuração da API da Groq
+groq_api_key = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=groq_api_key) if groq_api_key else None
 
-if not groq_api_key:
-    st.error("⚠️ Chave da API da Groq não encontrada! Configure o arquivo .env ou os Secrets do Streamlit.")
-    st.stop()
-
-client = Groq(api_key=groq_api_key)
-
-# Prompt Mestre do Agente
 SYSTEM_PROMPT = """
 Você é um Agente de Turismo especializado em suporte a viajantes. 
-
 Sua Missão e Função:
 - Auxiliar pessoas que estão planejando uma viagem, dar ideias criativas de lugares turísticos imperdíveis e prestar socorro imediato caso o viajante se perca.
 - O principal problema que você resolve é orientar com precisão quem está desorientado ou perdido durante o passeio.
-
 Público-Alvo:
 - Pessoas que estão viajando no momento ou planejando uma próxima aventura.
-
 Estilo de Comunicação:
 - Seja objetivo, descontraído, divertido e muito bem-informado sobre todos os pontos turísticos do destino.
 - Utilize um formato educado, porém acessível e sem formalidades chatas, adequado para todos os públicos.
-
 Informações a Considerar:
 - Considere sempre o contexto fornecido pelo usuário (como a localização atual que ele informar) para traçar rotas, sugerir atrações próximas ou ajudar no resgate de orientação.
-
 O que EVITAR Estritamente:
-- Nunca envie informações de localização errada ou imprecisas. Se faltar dado sobre a localização exata, peça educadamente para o usuário detalhar onde está.
+- Nunca envie informações de localização errada ou imprecisas. Se faltar dado sobre a localização exata, peça educadamente para o usuário detalhar onde está.  
+
+REQUISITO DE FORMATAÇÃO OBRIGATÓRIA:
+- Não utilize nenhum caractere especial de formatação em suas respostas. 
+- Proibido o uso de asteriscos (ou símbolos como *), negritos, itálicos, mais (+), barras (/), hashtags (#) ou qualquer outra marcação de markdown. 
+- Escreva todo o conteúdo em texto puro, fluido e objetivo, estruturando suas respostas apenas com parágrafos simples e pontuação comum.
+
 """
 
-# Interface visual
-st.title("✈️ Guia Turístico & SOS Viagem")
-st.markdown("O seu assistente de bolso para planejar roteiros ou te salvar se você se perder por aí! 🗺️")
 
-# Sidebar com controles extras (simulando a localização em tempo real)
-with st.sidebar:
-    st.header("📍 Configurações de Viagem")
-    localizacao_atual = st.text_input("Onde você está agora? (Ex: Roma, Itália / Perdido perto do Coliseu)")
-    destino_interesse = st.text_input("Para onde quer ir ou planeja viajar?")
-    
-    if st.button("Limpar Conversa"):
-        st.session_state.messages = []
-        st.rerun()
+# HTML embutido para mantermos o projeto com o mínimo de arquivos
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guia Turístico & SOS Viagem</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 320px;
+            background: #faf5ff;
+            border-right: 1px solid #f3e8ff;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            padding: 20px 24px;
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .chat-container {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .message {
+            padding: 12px 16px;
+            border-radius: 16px;
+            max-width: 70%;
+            line-height: 1.5;
+            font-size: 0.95rem;
+        }
+        .user {
+            background: #0f172a;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .assistant {
+            background: white;
+            color: #1e293b;
+            align-self: flex-start;
+            border: 1px solid #e2e8f0;
+            border-bottom-left-radius: 4px;
+        }
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            gap: 12px;
+        }
+        input, button {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            outline: none;
+        }
+        input { flex: 1; }
+        button {
+            background: #db2777;
+            color: white;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: #be185d; }
+        .input-group { margin-bottom: 16px; }
+        .input-group label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; }
+        .input-group input { width: 100%; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div>
+            <h2>📍 Configurações</h2>
+            <div class="input-group">
+                <label>Onde você está agora?</label>
+                <input type="text" id="loc" placeholder="Ex: Coliseu, Roma">
+            </div>
+            <div class="input-group">
+                <label>Destino de interesse:</label>
+                <input type="text" id="dest" placeholder="Ex: Tóquio, Japão">
+            </div>
+        </div>
+        <button onclick="limparChat()" style="background: #64748b; width: 100%;">🗑️ Limpar Conversa</button>
+    </div>
 
-# Inicializa o histórico de mensagens no Streamlit
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "assistant", "content": "Olá! Sou seu agente de turismo. Como posso te ajudar hoje? Vai planejar uma trip ou precisa de socorro com a rota? 🎒🌍"}
-    ]
-
-# Exibe o histórico de mensagens (ignorando a system message na tela)
-for message in st.session_state.messages:
-    if message["role"] != "system":
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-# Entrada do usuário pelo chat
-if prompt := st.chat_input("Digite sua dúvida ou peça ajuda com sua localização..."):
-    
-    # Adiciona contexto de localização se o usuário preencheu na barra lateral
-    user_input_with_context = prompt
-    if localizacao_atual:
-        user_input_with_context = f"[Minha localização atual informada: {localizacao_atual}] {prompt}"
-    if destino_interesse:
-        user_input_with_context = f"[Destino de interesse: {destino_interesse}] " + user_input_with_context
-
-    # Adiciona mensagem do usuário ao histórico
-    st.session_state.messages.append({"role": "user", "content": user_input_with_context})
-    
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # Chamada para a API da Groq (usando um modelo rápido como llama-3.3-70b-versatile)
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
+    <div class="main">
+        <div class="header">
+            <h1 style="margin:0; font-size: 1.5rem;">✈️ Guia Turístico & SOS Viagem</h1>
+            <p style="margin:4px 0 0 0; color: #64748b; font-size: 0.9rem;">Seu assistente de bolso para roteiros e resgates rápidos.</p>
+        </div>
         
-        try:
-            completion = client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=[
-                    {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.messages
-                ],
-                temperature=0.7,
-                max_tokens=1024,
-            )
-            
-            full_response = completion.choices[0].message.content
-            message_placeholder.markdown(full_response)
-            
-        except Exception as e:
-            full_response = f"Ops! Tive um probleminha técnico para me conectar com a central de turismo: `{e}`"
-            message_placeholder.markdown(full_response)
+        <div class="chat-container" id="chat">
+            <div class="message assistant">Olá! Sou seu agente de turismo. Como posso te ajudar hoje? Vai planejar uma trip ou precisa de socorro com a rota? 🎒🌍</div>
+        </div>
 
-    # Salva a resposta do assistente no histórico
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+        <div class="input-area">
+            <input type="text" id="userInput" placeholder="Digite sua dúvida ou peça ajuda..." onkeypress="if(event.key === 'Functi' || event.key === 'Enter') enviarMensagem()">
+            <button onclick="enviarMensagem()">Enviar 🚀</button>
+        </div>
+    </div>
+
+    <script>
+        let historico = [];
+
+        async function enviarMensagem() {
+            const input = document.getElementById('userInput');
+            const chat = document.getElementById('chat');
+            const loc = document.getElementById('loc').value;
+            const dest = document.getElementById('dest').value;
+
+            if (!input.value.trim()) return;
+
+            let textoUsuario = input.value;
+            let textoExibicao = textoUsuario;
+
+            if (loc || dest) {
+                textoUsuario = `[Localização: ${loc || 'Não informada'} | Destino: ${dest || 'Não informado'}] ${textoUsuario}`;
+            }
+
+            // Adiciona mensagem do usuário na tela
+            chat.innerHTML += `<div class="message user">${textoExibicao}</div>`;
+            input.value = '';
+            chat.scrollTop = chat.scrollHeight;
+
+            historico.push({ role: "user", content: textoUsuario });
+
+            // Envia para o backend Flask
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: historico })
+            });
+
+            const data = await response.json();
+            
+            if (data.resposta) {
+                chat.innerHTML += `<div class="message assistant">${data.resposta}</div>`;
+                historico.push({ role: "assistant", content: data.resposta });
+            } else {
+                chat.innerHTML += `<div class="message assistant">Erro ao conectar com a IA.</div>`;
+            }
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function limparChat() {
+            historico = [];
+            document.getElementById('chat').innerHTML = `<div class="message assistant">Conversa reiniciada! Para onde vamos agora?</div>`;
+        }
+    </script>
+</body>
+</html>
+"""
+
+@app.route("/")
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route("/chat", methods=["POST"])
+def chat():
+    if not client:
+        return jsonify({"resposta": "⚠️ Chave da API da Groq não configurada no servidor."})
+    
+    data = request.json
+    mensagens = data.get("messages", [])
+    
+    # Insere o System Prompt no topo das mensagens para manter o comportamento do agente
+    payload_mensagens = [{"role": "system", "content": SYSTEM_PROMPT}] + mensagens
+
+    try:
+        completion = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=payload_mensagens,
+            temperature=0.1,
+            max_tokens=1024,
+        )
+        resposta_ia = completion.choices[0].message.content
+        return jsonify({"resposta": resposta_ia})
+    except Exception as e:
+        return jsonify({"resposta": f"Ops, ocorreu um erro técnico: {str(e)}"})
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)
