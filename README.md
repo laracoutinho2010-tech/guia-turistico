@@ -4,7 +4,7 @@ Aplicação desenvolvida em **Python** utilizando **Streamlit** e a **API da Gro
 
 ## 🚀 Tecnologias Utilizadas
 - **Python**
-- **Streamlit** (Interface gráfica web)
+- [**flask** (Interface gráfica web)
 - **Groq API** (Processamento de linguagem natural ultra-rápido com Llama 3)
 - **GitHub** (Controle de versão)
 
